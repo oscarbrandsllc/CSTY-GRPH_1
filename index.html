@@ -2,50 +2,142 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>CONSISTENCY MAP — Justin Herbert</title>
+    <title>Weekly Fantasy Points — Liquid Glass Consistency Map</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <div class="header">
-        <div>
-          <div class="title">CONSISTENCY MAP</div>
-          <div class="player-name">Justin Herbert — Weekly Fantasy Output</div>
-        </div>
-        <div class="legend">
-          <span><b class="legend-dot legend-dot--low"></b>0–16: Low Impact</span>
-          <span><b class="legend-dot legend-dot--solid"></b>16–22: Solid</span>
-          <span><b class="legend-dot legend-dot--elite"></b>22–40: Elite</span>
-          <span><b class="legend-dot legend-dot--trace"></b>Performance Trace</span>
-        </div>
-      </div>
+    <main class="page">
+      <section class="glass-shell">
+        <!-- Ambient caustic glows -->
+        <div class="shell-glow shell-glow--left"></div>
+        <div class="shell-glow shell-glow--right"></div>
 
-      <div class="stat-pills">
-        <div class="stat-pill" data-tone="high">
-          <div class="pill-label">Ceiling Pulse</div>
-          <div class="pill-value" id="stat-high">--</div>
-          <div class="pill-sub" id="stat-high-week">Week —</div>
-        </div>
-        <div class="stat-pill" data-tone="avg">
-          <div class="pill-label">Liquid Mean</div>
-          <div class="pill-value" id="stat-average">--</div>
-          <div class="pill-sub">Season Average</div>
-        </div>
-        <div class="stat-pill" data-tone="low">
-          <div class="pill-label">Floor Echo</div>
-          <div class="pill-value" id="stat-low">--</div>
-          <div class="pill-sub" id="stat-low-week">Week —</div>
-        </div>
-        <div class="stat-pill" data-tone="vol">
-          <div class="pill-label">Volatility Wake</div>
-          <div class="pill-value" id="stat-range">--</div>
-          <div class="pill-sub">High − Low</div>
-        </div>
-      </div>
+        <!-- Top integrated HUD band -->
+        <header class="hud">
+          <!-- Left: Consistency progress circle -->
+          <div class="hud-segment hud-segment--left">
+            <div class="hud-label">Liquid Glass Consistency Map</div>
+            <div class="progress-circle progress-circle--consistency" aria-label="Season Consistency Rate 66.7%">
+              <svg viewBox="0 0 120 120" class="progress-ring">
+                <defs>
+                  <linearGradient id="consistencyGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#7cf5ff" />
+                    <stop offset="55%" stop-color="#9f8bff" />
+                    <stop offset="100%" stop-color="#c7a4ff" />
+                  </linearGradient>
+                </defs>
+                <circle
+                  class="progress-ring-track"
+                  cx="60"
+                  cy="60"
+                  r="46"
+                />
+                <circle
+                  class="progress-ring-fill"
+                  cx="60"
+                  cy="60"
+                  r="46"
+                  stroke="url(#consistencyGradient)"
+                  style="--progress: 0.667;"
+                />
+              </svg>
+              <div class="progress-circle-inner">
+                <div class="progress-value">66.7%</div>
+                <div class="progress-label">Consistency Rate</div>
+                <div class="progress-caption">Season</div>
+              </div>
+            </div>
+          </div>
 
-      <canvas id="infographicCanvas"></canvas>
-    </div>
+          <!-- Center: Key stats -->
+          <div class="hud-segment hud-segment--center">
+            <div class="hud-player">
+              <div class="hud-eyebrow">WEEKLY FANTASY POINTS — JUSTIN HERBERT</div>
+              <div class="hud-context">Weeks 1–9 • 0–40 pt evaluation lens</div>
+            </div>
+            <div class="hud-metrics">
+              <div class="metric-block">
+                <div class="metric-label">Consistency</div>
+                <div class="metric-primary">
+                  <span class="metric-value">66.7%</span>
+                  <span class="metric-sub">Pos Rank: 11</span>
+                </div>
+              </div>
+              <div class="metric-block">
+                <div class="metric-label">Ceiling</div>
+                <div class="metric-primary">
+                  <span class="metric-value">28.8</span>
+                  <span class="metric-sub">Pos Rank: 4</span>
+                </div>
+              </div>
+            </div>
+            <div class="hud-series-label">
+              Weekly Fantasy Points — Justin Herbert (Weeks 1–9)
+            </div>
+            <div class="hud-zones-legend">
+              <span class="zone-chip zone-chip--bad">Bad 0–16</span>
+              <span class="zone-chip zone-chip--good">Good 16–22</span>
+              <span class="zone-chip zone-chip--great">Great 22–40</span>
+            </div>
+          </div>
+
+          <!-- Right: Ceiling positional ranking circle -->
+          <div class="hud-segment hud-segment--right">
+            <div class="progress-circle progress-circle--ceiling" aria-label="Ceiling Positional Rank 4, closer to 1 is better">
+              <svg viewBox="0 0 120 120" class="progress-ring">
+                <defs>
+                  <linearGradient id="ceilingGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#ffb47e" />
+                    <stop offset="40%" stop-color="#7cf5ff" />
+                    <stop offset="100%" stop-color="#ff89cf" />
+                  </linearGradient>
+                </defs>
+                <circle
+                  class="progress-ring-track"
+                  cx="60"
+                  cy="60"
+                  r="46"
+                />
+                <circle
+                  class="progress-ring-fill progress-ring-fill--ceiling"
+                  cx="60"
+                  cy="60"
+                  r="46"
+                  stroke="url(#ceilingGradient)"
+                  style="--progress: 0.842;"
+                />
+              </svg>
+              <div class="progress-circle-inner">
+                <div class="progress-value">4</div>
+                <div class="progress-label">Ceiling Pos Rank</div>
+                <div class="progress-caption">Best: 1</div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- Chart container: canvas + tooltip overlay -->
+        <section class="chart-shell">
+          <div class="chart-glass-layer chart-glass-layer--outer"></div>
+          <div class="chart-glass-layer chart-glass-layer--inner"></div>
+          <div class="chart-caustic chart-caustic--top"></div>
+          <div class="chart-caustic chart-caustic--bottom"></div>
+
+          <canvas id="infographicCanvas" aria-label="Weekly fantasy points liquid glass chart" role="img"></canvas>
+
+          <!-- Tooltip overlay (positioned by JS) -->
+          <div id="chart-tooltip" class="chart-tooltip" hidden>
+            <div class="tooltip-label" id="tooltip-week">Week 1</div>
+            <div class="tooltip-value" id="tooltip-value">27.9 pts</div>
+            <div class="tooltip-zone" id="tooltip-zone">Great Zone</div>
+          </div>
+
+          <!-- Week labels track removed to avoid second x-axis; canvas axis is the single timeline source -->
+          <div class="week-track" aria-hidden="true"></div>
+        </section>
+      </section>
+    </main>
 
     <script src="app.js"></script>
   </body>

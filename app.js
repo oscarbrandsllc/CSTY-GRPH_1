@@ -1,464 +1,376 @@
-const canvas = document.getElementById("infographicCanvas");
-const ctx = canvas.getContext("2d");
+/**
+ * Liquid Glass Fantasy Consistency Chart
+ * Deterministic, static, no animations.
+ * - Preserves HUD / progress circles.
+ * - Builds a new chart DOM next to #infographicCanvas inside .chart-shell.
+ * - Uses SVG for the curve and fixed glassy labels, no randomness.
+ */
 
-const stats = {
-  high: document.getElementById("stat-high"),
-  highWeek: document.getElementById("stat-high-week"),
-  avg: document.getElementById("stat-average"),
-  low: document.getElementById("stat-low"),
-  lowWeek: document.getElementById("stat-low-week"),
-  range: document.getElementById("stat-range")
-};
+/* -------------------------
+ * DATA / CONSTANTS
+ * ---------------------- */
 
-const weeks = [
-  { week: "WK1", value: 27.9 },
-  { week: "WK2", value: 18.8 },
-  { week: "WK3", value: 15.6 },
-  { week: "WK4", value: 14.5 },
-  { week: "WK5", value: 15.6 },
-  { week: "WK6", value: 18.8 },
-  { week: "WK7", value: 29.9 },
-  { week: "WK8", value: 26.3 },
-  { week: "WK9", value: 28.7 }
+const MAX_PTS = 40;
+const UNDER_MAX = 15.9;
+const SOLID_MAX = 21.9;
+const ELITE_MIN = 22;
+
+const DATA_POINTS = [
+  { week: 1, pts: 27.9 },
+  { week: 2, pts: 18.8 },
+  { week: 3, pts: 15.6 },
+  { week: 4, pts: 14.5 },
+  { week: 5, pts: 15.6 },
+  { week: 6, pts: 18.8 },
+  { week: 7, pts: 29.9 },
+  { week: 8, pts: 26.3 },
+  { week: 9, pts: 28.7 }
 ];
 
-const minVal = 0;
-const maxVal = 40;
-const padding = { top: 90, right: 90, bottom: 150, left: 120 };
-const sparkles = Array.from({ length: 70 }, () => ({
-  x: Math.random(),
-  y: Math.random(),
-  size: 0.5 + Math.random() * 1.3,
-  drift: 0.25 + Math.random() * 0.75,
-  hue: Math.random() > 0.5 ? "rgba(94, 247, 255, 0.65)" : "rgba(255, 122, 204, 0.5)"
-}));
+const LG_Y_TICKS = [40, 22, 16, 0];
 
-let animationFrame;
-let tick = 0;
+/* -------------------------
+ * HUD / PROGRESS CIRCLES
+ * (unchanged, deterministic)
+ * ---------------------- */
 
-const formatWeek = (w) => w.replace("WK", "WK ");
-const formatPoints = (value) => `${value.toFixed(1)} pts`;
+const PROGRESS_CONFIG = {
+  ceilingRankMax: 20,
+  consistencyPercent: 66.7,
+  ceilingRank: 4
+};
 
-function hydrateStats() {
-  const sorted = [...weeks].sort((a, b) => b.value - a.value);
-  const high = sorted[0];
-  const low = sorted[sorted.length - 1];
-  const avg = weeks.reduce((acc, cur) => acc + cur.value, 0) / weeks.length;
-  stats.high.textContent = formatPoints(high.value);
-  stats.highWeek.textContent = `${formatWeek(high.week)} — crest`;
-  stats.low.textContent = formatPoints(low.value);
-  stats.lowWeek.textContent = `${formatWeek(low.week)} — trough`;
-  stats.avg.textContent = formatPoints(avg);
-  stats.range.textContent = formatPoints(high.value - low.value);
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
 }
 
-hydrateStats();
+function hydrateProgressCircles() {
+  const consistencyCircle = document.querySelector(
+    ".progress-circle--consistency .progress-ring-fill"
+  );
+  if (consistencyCircle) {
+    consistencyCircle.style.setProperty(
+      "--progress",
+      (PROGRESS_CONFIG.consistencyPercent / 100).toFixed(3)
+    );
+  }
 
-function valueToY(val, rect) {
-  const pct = (val - minVal) / (maxVal - minVal);
-  return rect.y + rect.h - pct * rect.h;
+  const ceilingCircle = document.querySelector(
+    ".progress-circle--ceiling .progress-ring-fill--ceiling"
+  );
+  if (ceilingCircle) {
+    const rank = PROGRESS_CONFIG.ceilingRank;
+    const normalized = clamp(
+      (PROGRESS_CONFIG.ceilingRankMax - rank) /
+        (PROGRESS_CONFIG.ceilingRankMax - 1),
+      0,
+      1
+    );
+    ceilingCircle.style.setProperty("--progress", normalized.toFixed(3));
+  }
 }
 
-function buildPoints(rect) {
-  const usableWidth = rect.w;
-  const spacing = usableWidth / (weeks.length - 1);
-  return weeks.map((wk, idx) => ({
-    ...wk,
-    x: rect.x + idx * spacing,
-    y: valueToY(wk.value, rect)
-  }));
+/* -------------------------
+ * ZONES / MAPPING
+ * ---------------------- */
+
+function getZoneForPoints(pts) {
+  if (pts >= ELITE_MIN) {
+    return { name: "Elite", className: "lg-zone--great" };
+  }
+  if (pts > UNDER_MAX && pts <= SOLID_MAX) {
+    return { name: "Solid", className: "lg-zone--good" };
+  }
+  return { name: "Under", className: "lg-zone--bad" };
 }
 
-function drawRoundedPanel(x, y, width, height, radius = 32) {
-  const r = Math.min(radius, height / 2, width / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+function mapYPercent(pts) {
+  const clamped = Math.max(0, Math.min(MAX_PTS, pts));
+  const t = 1 - clamped / MAX_PTS; // 0 at bottom, 1 at top -> invert
+  return t * 100;
 }
 
-function paintBackdrop(w, h, time) {
-  const gradient = ctx.createLinearGradient(0, 0, w, h);
-  gradient.addColorStop(0, "rgba(3, 6, 18, 0.95)");
-  gradient.addColorStop(1, "rgba(7, 12, 28, 0.95)");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, w, h);
+/* -------------------------
+ * DOM STRUCTURE
+ * ---------------------- */
 
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  ctx.filter = "blur(120px)";
-  ctx.fillStyle = `rgba(118, 255, 248, ${0.12 + 0.05 * Math.sin(time * 0.6)})`;
-  ctx.beginPath();
-  ctx.ellipse(w * 0.3, h * 0.2, w * 0.35, h * 0.22, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = `rgba(255, 120, 210, ${0.1 + 0.04 * Math.cos(time * 0.7)})`;
-  ctx.beginPath();
-  ctx.ellipse(w * 0.75, h * 0.68, w * 0.4, h * 0.25, 0.4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
+function buildChartStructure() {
+  const canvas = document.getElementById("infographicCanvas");
+  if (!canvas || !canvas.parentNode) return null;
 
-function drawGlassBackplate(rect) {
-  ctx.save();
-  drawRoundedPanel(rect.x - 50, rect.y - 60, rect.w + 100, rect.h + 140, 42);
-  const gradient = ctx.createLinearGradient(rect.x, rect.y - 80, rect.x + rect.w, rect.y + rect.h + 140);
-  gradient.addColorStop(0, "rgba(12, 16, 32, 0.9)");
-  gradient.addColorStop(0.35, "rgba(18, 24, 46, 0.75)");
-  gradient.addColorStop(1, "rgba(7, 9, 22, 0.6)");
-  ctx.fillStyle = gradient;
-  ctx.fill();
-  ctx.strokeStyle = "rgba(118, 156, 255, 0.25)";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+  // Reuse existing root if present
+  let root = document.getElementById("lg-chart-root");
+  if (root) {
+    root.innerHTML = "";
+  } else {
+    root = document.createElement("div");
+    root.id = "lg-chart-root";
+    root.className = "lg-chart-root";
 
-  const sheen = ctx.createLinearGradient(rect.x, rect.y - 60, rect.x, rect.y + rect.h);
-  sheen.addColorStop(0, "rgba(255, 255, 255, 0.22)");
-  sheen.addColorStop(0.25, "rgba(255, 255, 255, 0.05)");
-  sheen.addColorStop(1, "rgba(255, 255, 255, 0)");
-  ctx.clip();
-  ctx.fillStyle = sheen;
-  ctx.fillRect(rect.x - 50, rect.y - 60, rect.w + 100, rect.h + 140);
-  ctx.restore();
-}
-
-function drawZoneBands(rect) {
-  const eliteTop = rect.y;
-  const eliteBottom = valueToY(22, rect);
-  const solidBottom = valueToY(16, rect);
-  ctx.save();
-  ctx.fillStyle = "rgba(91, 230, 255, 0.08)";
-  ctx.fillRect(rect.x, eliteTop, rect.w, eliteBottom - eliteTop);
-  ctx.fillStyle = "rgba(136, 120, 255, 0.08)";
-  ctx.fillRect(rect.x, eliteBottom, rect.w, solidBottom - eliteBottom);
-  ctx.fillStyle = "rgba(255, 116, 193, 0.06)";
-  ctx.fillRect(rect.x, solidBottom, rect.w, rect.y + rect.h - solidBottom);
-  ctx.restore();
-}
-
-function drawLiquidWaves(rect, time) {
-  const renderWave = (amplitude, phase, color, opacity) => {
-    ctx.save();
-    ctx.beginPath();
-    const baseY = rect.y + rect.h * 0.35;
-    const segments = 80;
-    for (let i = 0; i <= segments; i++) {
-      const pct = i / segments;
-      const x = rect.x + pct * rect.w;
-      const waveY = baseY + Math.sin(pct * Math.PI * 2 + phase + time * 0.6) * amplitude;
-      if (i === 0) ctx.moveTo(x, waveY);
-      else ctx.lineTo(x, waveY);
+    // Insert immediately AFTER the canvas in the same parent
+    const parent = canvas.parentNode;
+    const next = canvas.nextSibling;
+    if (next) {
+      parent.insertBefore(root, next);
+    } else {
+      parent.appendChild(root);
     }
-    ctx.lineTo(rect.x + rect.w, rect.y + rect.h + 40);
-    ctx.lineTo(rect.x, rect.y + rect.h + 40);
-    ctx.closePath();
-    ctx.globalCompositeOperation = "screen";
-    ctx.fillStyle = `rgba(${color.join(",")}, ${opacity})`;
-    ctx.fill();
-    ctx.restore();
+  }
+
+  // Main box that holds everything
+  const box = document.createElement("div");
+  box.className = "lg-chart-box";
+  root.appendChild(box);
+
+  // Y axis
+  const yAxis = document.createElement("div");
+  yAxis.className = "lg-y-axis";
+  box.appendChild(yAxis);
+
+  // Chart body wrapper
+  const body = document.createElement("div");
+  body.className = "lg-chart-body";
+  box.appendChild(body);
+
+  // Zones
+  const zones = document.createElement("div");
+  zones.className = "lg-zones";
+  body.appendChild(zones);
+
+  // Grid overlay
+  const grid = document.createElement("div");
+  grid.className = "lg-grid";
+  body.appendChild(grid);
+
+  // Points + curve layer
+  const pointsLayer = document.createElement("div");
+  pointsLayer.className = "lg-points-layer";
+  body.appendChild(pointsLayer);
+
+  // X axis
+  const xAxis = document.createElement("div");
+  xAxis.className = "lg-x-axis";
+  box.appendChild(xAxis);
+
+  return {
+    root,
+    box,
+    yAxis,
+    zones,
+    grid,
+    pointsLayer,
+    xAxis
   };
-
-  renderWave(rect.h * 0.06, 0, [95, 232, 255], 0.08);
-  renderWave(rect.h * 0.08, Math.PI / 2, [255, 128, 214], 0.05);
 }
 
-function drawGrid(rect) {
-  ctx.save();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
-  ctx.lineWidth = 1;
-  ctx.setLineDash([6, 12]);
-  for (let v = 0; v <= maxVal; v += 10) {
-    const y = valueToY(v, rect);
-    ctx.beginPath();
-    ctx.moveTo(rect.x, y);
-    ctx.lineTo(rect.x + rect.w, y);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
-  weeks.forEach((_, idx) => {
-    const x = rect.x + (rect.w / (weeks.length - 1)) * idx;
-    ctx.globalAlpha = 0.35;
-    ctx.beginPath();
-    ctx.moveTo(x, rect.y);
-    ctx.lineTo(x, rect.y + rect.h);
-    ctx.stroke();
-  });
-  ctx.restore();
+/* -------------------------
+ * BUILD ZONES / AXES
+ * ---------------------- */
+
+function buildZones(container) {
+  container.innerHTML = "";
+
+  const underHeightPct = ((UNDER_MAX - 0) / MAX_PTS) * 100;
+  const solidHeightPct = ((SOLID_MAX - UNDER_MAX) / MAX_PTS) * 100;
+  const eliteHeightPct = ((MAX_PTS - ELITE_MIN) / MAX_PTS) * 100;
+
+  const elite = document.createElement("div");
+  elite.className = "lg-zone lg-zone--great";
+  elite.style.top = "0%";
+  elite.style.height = `${eliteHeightPct}%`;
+  container.appendChild(elite);
+
+  const solid = document.createElement("div");
+  solid.className = "lg-zone lg-zone--good";
+  solid.style.top = `${eliteHeightPct}%`;
+  solid.style.height = `${solidHeightPct}%`;
+  container.appendChild(solid);
+
+  const under = document.createElement("div");
+  under.className = "lg-zone lg-zone--bad";
+  under.style.top = `${eliteHeightPct + solidHeightPct}%`;
+  under.style.height = `${underHeightPct}%`;
+  container.appendChild(under);
 }
 
-function drawSparkles(rect, time) {
-  ctx.save();
-  ctx.globalCompositeOperation = "screen";
-  sparkles.forEach((sparkle, idx) => {
-    const oscillation = Math.sin(time * 0.6 + idx) * 0.02;
-    const x = rect.x + (((sparkle.x + oscillation) % 1 + 1) % 1) * rect.w;
-    const y = rect.y + (((sparkle.y + time * 0.02 * sparkle.drift) % 1 + 1) % 1) * rect.h;
-    const radius = 10 + sparkle.size * 20;
-    const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    glow.addColorStop(0, sparkle.hue);
-    glow.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  ctx.restore();
-}
+function buildYAxis(container) {
+  container.innerHTML = "";
+  LG_Y_TICKS.forEach((val) => {
+    const tick = document.createElement("div");
+    tick.className = "lg-y-tick";
 
-function drawColumns(points, rect, time) {
-  const columnWidth = Math.min(50, (rect.w / (weeks.length - 1)) * 0.55);
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  points.forEach((p, idx) => {
-    const x = p.x - columnWidth / 2;
-    const baseY = rect.y + rect.h;
-    const gradient = ctx.createLinearGradient(x, p.y, x, baseY);
-    gradient.addColorStop(0, "rgba(96, 248, 255, 0.25)");
-    gradient.addColorStop(0.5, "rgba(90, 126, 255, 0.12)");
-    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(x, p.y, columnWidth, baseY - p.y);
+    const label = document.createElement("div");
+    label.className = "lg-y-label";
+    label.textContent = `${val} fpts`;
 
-    const offset = Math.sin(time * 1.4 + idx) * 8;
-    const highlight = ctx.createLinearGradient(x, p.y - 20, x, baseY);
-    highlight.addColorStop(0, "rgba(255, 255, 255, 0.25)");
-    highlight.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = highlight;
-    ctx.beginPath();
-    ctx.moveTo(x, p.y + offset);
-    ctx.quadraticCurveTo(p.x, p.y - 50, x + columnWidth, p.y + offset);
-    ctx.lineTo(x + columnWidth, baseY);
-    ctx.lineTo(x, baseY);
-    ctx.closePath();
-    ctx.fill();
-  });
-  ctx.restore();
-}
-
-function traceCurve(points, close = false, baseY = 0) {
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 0; i < points.length - 1; i++) {
-    const current = points[i];
-    const next = points[i + 1];
-    const midX = (current.x + next.x) / 2;
-    const midY = (current.y + next.y) / 2;
-    ctx.quadraticCurveTo(current.x, current.y, midX, midY);
-  }
-  const lastPoint = points[points.length - 1];
-  ctx.lineTo(lastPoint.x, lastPoint.y);
-  if (close) {
-    ctx.lineTo(lastPoint.x, baseY);
-    ctx.lineTo(points[0].x, baseY);
-    ctx.closePath();
-  }
-}
-
-function drawArea(points, rect) {
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  const gradient = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.h);
-  gradient.addColorStop(0, "rgba(107, 251, 255, 0.35)");
-  gradient.addColorStop(0.35, "rgba(118, 133, 255, 0.25)");
-  gradient.addColorStop(1, "rgba(5, 7, 17, 0)");
-  ctx.fillStyle = gradient;
-  traceCurve(points, true, rect.y + rect.h);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawSpline(points) {
-  ctx.save();
-  ctx.shadowColor = "rgba(95, 248, 255, 0.35)";
-  ctx.shadowBlur = 25;
-  ctx.lineWidth = 3;
-  const lastPoint = points[points.length - 1];
-  const gradient = ctx.createLinearGradient(points[0].x, points[0].y, lastPoint.x, lastPoint.y);
-  gradient.addColorStop(0, "#5ef3ff");
-  gradient.addColorStop(0.5, "#7a7cff");
-  gradient.addColorStop(1, "#ff8ace");
-  ctx.strokeStyle = gradient;
-  traceCurve(points, false, 0);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function zoneVisuals(value) {
-  if (value <= 16) {
-    return { core: "#ff74c7", glow: "rgba(255, 123, 210, 0.65)", chip: "rgba(255, 116, 193, 0.75)" };
-  }
-  if (value <= 22) {
-    return { core: "#b6a1ff", glow: "rgba(181, 167, 255, 0.6)", chip: "rgba(146, 127, 255, 0.75)" };
-  }
-  return { core: "#85f8ff", glow: "rgba(133, 248, 255, 0.7)", chip: "rgba(133, 248, 255, 0.85)" };
-}
-
-function drawPointDetails(points, rect) {
-  points.forEach((p) => {
-    const zone = zoneVisuals(p.value);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 32);
-    glow.addColorStop(0, zone.glow);
-    glow.addColorStop(0.8, "rgba(0,0,0,0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 32, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    const pulse = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 12);
-    pulse.addColorStop(0, "#060a15");
-    pulse.addColorStop(1, zone.core);
-    ctx.fillStyle = pulse;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.save();
-    ctx.setLineDash([4, 6]);
-    ctx.strokeStyle = "rgba(133, 248, 255, 0.25)";
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y + 12);
-    ctx.lineTo(p.x, rect.y + rect.h);
-    ctx.stroke();
-    ctx.restore();
-
-    const label = `${p.value.toFixed(1)} pts`;
-    ctx.font = "12.4px 'Space Grotesk', system-ui, sans-serif";
-    const labelWidth = ctx.measureText(label).width + 32;
-    const chipX = Math.min(Math.max(p.x - labelWidth / 2, rect.x + 10), rect.x + rect.w - labelWidth - 10);
-    const chipY = p.y - 48;
-    const chipHeight = 30;
-    ctx.save();
-    drawRoundedPanel(chipX, chipY, labelWidth, chipHeight, 14);
-    const chipGrad = ctx.createLinearGradient(chipX, chipY, chipX + labelWidth, chipY + chipHeight);
-    chipGrad.addColorStop(0, "rgba(6, 7, 18, 0.95)");
-    chipGrad.addColorStop(1, "rgba(24, 29, 55, 0.55)");
-    ctx.fillStyle = chipGrad;
-    ctx.fill();
-    ctx.strokeStyle = zone.chip;
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    ctx.globalCompositeOperation = "screen";
-    const chipSheen = ctx.createLinearGradient(chipX, chipY, chipX, chipY + chipHeight);
-    chipSheen.addColorStop(0, `${zone.chip}`);
-    chipSheen.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = chipSheen;
-    drawRoundedPanel(chipX, chipY, labelWidth, chipHeight, 14);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.fillStyle = "#f7fbff";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, chipX + 16, chipY + chipHeight / 2);
+    tick.appendChild(label);
+    container.appendChild(tick);
   });
 }
 
-function drawAxes(rect) {
-  ctx.save();
-  ctx.strokeStyle = "rgba(133, 160, 255, 0.4)";
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.moveTo(rect.x, rect.y - 15);
-  ctx.lineTo(rect.x, rect.y + rect.h + 10);
-  ctx.lineTo(rect.x + rect.w + 15, rect.y + rect.h + 10);
-  ctx.stroke();
-  ctx.restore();
+function buildXAxis(container) {
+  container.innerHTML = "";
+  DATA_POINTS.forEach((pt) => {
+    const lab = document.createElement("div");
+    lab.className = "lg-x-label";
+    lab.textContent = `WK ${pt.week}`;
+    container.appendChild(lab);
+  });
 }
 
-function drawAxisLabels(rect, points) {
-  ctx.font = "12px 'Space Grotesk', system-ui, sans-serif";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
-  for (let v = 0; v <= maxVal; v += 10) {
-    const y = valueToY(v, rect);
-    const text = `${v} pts`;
-    ctx.fillText(text, rect.x - 70, y);
-  }
+/* -------------------------
+ * CURVE / POINTS
+ * ---------------------- */
 
-  ctx.textBaseline = "top";
-  points.forEach((p) => {
-    const weekLabel = p.week.replace("WK", "WK • ");
-    ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
-    ctx.fillText(weekLabel, p.x - 26, rect.y + rect.h + 18);
+function buildPointsAndCurve(container) {
+  container.innerHTML = "";
+
+  const svgNS = "http://www.w3.org/2000/svg";
+
+  // SVG back layer for curve
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.classList.add("lg-curve-layer");
+  svg.setAttribute("aria-hidden", "true");
+  container.appendChild(svg);
+
+  const width = container.clientWidth || 800;
+  const height = container.clientHeight || 260;
+
+  const n = DATA_POINTS.length;
+  const pts = DATA_POINTS.map((p, i) => {
+    const xPct = ((i + 0.5) / n) * 100;
+    const yPct = mapYPercent(p.pts);
+    return {
+      ...p,
+      xPct,
+      yPct,
+      x: (xPct / 100) * width,
+      y: (yPct / 100) * height
+    };
   });
 
-  ctx.save();
-  ctx.translate(rect.x - 90, rect.y + rect.h / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-  ctx.font = "14px 'Space Grotesk', system-ui, sans-serif";
-  ctx.fillText("Fantasy Points", 0, 0);
-  ctx.restore();
+  // Smooth path using Catmull-Rom -> Bezier-style interpolation
+  const pathD = buildSmoothSvgPath(pts);
 
-  ctx.font = "14px 'Space Grotesk', system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("Week Timeline", rect.x + rect.w / 2, rect.y + rect.h + 50);
+  // Glow path
+  const glowPath = document.createElementNS(svgNS, "path");
+  glowPath.setAttribute("d", pathD);
+  glowPath.classList.add("lg-curve", "lg-curve--glow");
+  svg.appendChild(glowPath);
+
+  // Core path
+  const corePath = document.createElementNS(svgNS, "path");
+  corePath.setAttribute("d", pathD);
+  corePath.classList.add("lg-curve", "lg-curve--core");
+  svg.appendChild(corePath);
+
+  // Points + labels
+  pts.forEach((p) => {
+    const zone = getZoneForPoints(p.pts);
+
+    const point = document.createElement("div");
+    point.className = `lg-point ${zone.className}`;
+    point.style.left = `calc(${p.xPct}% - 6px)`;
+    point.style.top = `calc(${p.yPct}% - 6px)`;
+    container.appendChild(point);
+
+    const label = document.createElement("div");
+    label.className = "lg-point-label";
+    label.innerHTML = `
+      <div class="lg-point-label-week">WK ${p.week}</div>
+      <div class="lg-point-label-pts">${p.pts.toFixed(1)} fpts</div>
+      <div class="lg-point-label-zone">${zone.name}</div>
+    `;
+    label.style.left = `calc(${p.xPct}% - 40px)`;
+    label.style.top = `calc(${p.yPct}% - 54px)`;
+    container.appendChild(label);
+  });
 }
 
-function draw(time = 0) {
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.restore();
+function buildSmoothSvgPath(points) {
+  if (!points.length) return "";
 
-  ctx.save();
-  paintBackdrop(w, h, time);
-  const rect = {
-    x: padding.left,
-    y: padding.top,
-    w: w - padding.left - padding.right,
-    h: h - padding.top - padding.bottom
-  };
-  drawGlassBackplate(rect);
-  drawZoneBands(rect);
-  drawLiquidWaves(rect, time);
-  drawGrid(rect);
-  drawSparkles(rect, time);
-  const points = buildPoints(rect);
-  drawColumns(points, rect, time);
-  drawArea(points, rect);
-  drawSpline(points);
-  drawPointDetails(points, rect);
-  drawAxes(rect);
-  drawAxisLabels(rect, points);
-  ctx.restore();
-}
-
-function render() {
-  draw(tick);
-  tick += 0.01;
-  animationFrame = requestAnimationFrame(render);
-}
-
-function resizeCanvas() {
-  const ratio = window.devicePixelRatio || 1;
-  canvas.width = canvas.clientWidth * ratio;
-  canvas.height = canvas.clientHeight * ratio;
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-}
-
-function handleResize() {
-  resizeCanvas();
-  if (animationFrame) {
-    cancelAnimationFrame(animationFrame);
+  if (points.length === 1) {
+    const p = points[0];
+    return `M ${p.x},${p.y}`;
   }
-  render();
+
+  if (points.length === 2) {
+    const p0 = points[0];
+    const p1 = points[1];
+    return `M ${p0.x},${p0.y} L ${p1.x},${p1.y}`;
+  }
+
+  const tension = 0.24;
+  let d = `M ${points[0].x},${points[0].y}`;
+
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+
+    const cp1x = p1.x + (p2.x - p0.x) * tension;
+    const cp1y = p1.y + (p2.y - p0.y) * tension;
+    const cp2x = p2.x - (p3.x - p1.x) * tension;
+    const cp2y = p2.y - (p3.y - p1.y) * tension;
+
+    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+  }
+
+  return d;
 }
 
-window.addEventListener("resize", handleResize);
-handleResize();
+/* -------------------------
+ * MOUNT / RESIZE
+ * ---------------------- */
+
+let lastStructure = null;
+
+function mountChart() {
+  lastStructure = buildChartStructure();
+  if (!lastStructure) return;
+
+  const { zones, yAxis, pointsLayer, xAxis } = lastStructure;
+
+  buildZones(zones);
+  buildYAxis(yAxis);
+  buildXAxis(xAxis);
+  buildPointsAndCurve(pointsLayer);
+}
+
+function remountDynamicLayers() {
+  if (!lastStructure) {
+    mountChart();
+    return;
+  }
+  const { zones, yAxis, pointsLayer, xAxis } = lastStructure;
+  if (!zones || !yAxis || !pointsLayer || !xAxis) {
+    mountChart();
+    return;
+  }
+
+  buildZones(zones);
+  buildYAxis(yAxis);
+  buildXAxis(xAxis);
+  buildPointsAndCurve(pointsLayer);
+}
+
+/* -------------------------
+ * INIT
+ * ---------------------- */
+
+function init() {
+  hydrateProgressCircles();
+  mountChart();
+
+  window.addEventListener("resize", () => {
+    remountDynamicLayers();
+  });
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}
