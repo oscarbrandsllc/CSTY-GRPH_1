@@ -1,464 +1,667 @@
+/**
+ * Liquid Glass Weekly Fantasy Points Chart
+ * Single static render (no animation loop) + interactive hover tooltips.
+ * Data and zones:
+ * - Data: [27.9, 18.8, 15.6, 14.5, 15.6, 18.8, 29.9, 26.3, 28.7] for weeks 1-9
+ * - Zones (0-40):
+ *   - Bad: 0-16 (cool)
+ *   - Good: 16-22 (neutral)
+ *   - Great: 22-40 (warm)
+ */
+
+const CONFIG = {
+  // Data domain
+  minVal: 0,
+  maxVal: 40,
+
+  // Fixed paddings in px (applied relative via clamped logic in computeLayout)
+  padding: {
+    top: 40,     // space for chart title + subtitle
+    right: 32,   // prevent last point / labels clipping
+    bottom: 46,  // x-axis ticks + labels + "Week"
+    left: 54     // y-axis ticks + vertical label
+  },
+
+  // Hit radius in px for hover detection on logical canvas space
+  hitRadius: 16,
+
+  fontFamily: `"Space Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`,
+
+  // Y-axis tick values
+  yTicks: [0, 8, 16, 22, 30, 40],
+
+  // Tooltip sizing fallback used for clamping (matches CSS min-width)
+  tooltipWidthFallback: 136,
+
+  // Max rank for ceiling circle mapping (HUD-only)
+  ceilingRankMax: 20
+};
+
+const DATA = {
+  player: "Justin Herbert",
+  weeks: [
+    { weekIndex: 1, label: "WK1", value: 27.9 },
+    { weekIndex: 2, label: "WK2", value: 18.8 },
+    { weekIndex: 3, label: "WK3", value: 15.6 },
+    { weekIndex: 4, label: "WK4", value: 14.5 },
+    { weekIndex: 5, label: "WK5", value: 15.6 },
+    { weekIndex: 6, label: "WK6", value: 18.8 },
+    { weekIndex: 7, label: "WK7", value: 29.9 },
+    { weekIndex: 8, label: "WK8", value: 26.3 },
+    { weekIndex: 9, label: "WK9", value: 28.7 }
+  ]
+};
+
+const ZONES = {
+  BAD: { name: "Bad", key: "bad", min: 0, max: 16 },
+  GOOD: { name: "Good", key: "good", min: 16, max: 22 },
+  GREAT: { name: "Great", key: "great", min: 22, max: 40 }
+};
+
+const COLORS = {
+  backgroundTop: "#020309",
+  backgroundBottom: "#050714",
+  gridLine: "rgba(255,255,255,0.06)",
+  weekGrid: "rgba(120, 150, 255, 0.08)",
+  axis: "rgba(146, 180, 255, 0.6)",
+  textSoft: "rgba(144,150,192,0.9)",
+  zoneBad: {
+    fillFrom: "rgba(15, 26, 56, 0.78)",
+    fillTo: "rgba(8, 12, 29, 0.38)",
+    accent: "#ff6fb6"
+  },
+  zoneGood: {
+    fillFrom: "rgba(45, 41, 82, 0.80)",
+    fillTo: "rgba(22, 22, 44, 0.38)",
+    accent: "#b9acff"
+  },
+  zoneGreat: {
+    fillFrom: "rgba(19, 53, 70, 0.84)",
+    fillTo: "rgba(20, 24, 37, 0.42)",
+    accent: "#7cf5ff"
+  },
+  spline: {
+    from: "#7cf5ff",
+    mid: "#9f8bff",
+    to: "#ff89cf"
+  }
+};
+
+/* DOM REFS */
+
 const canvas = document.getElementById("infographicCanvas");
 const ctx = canvas.getContext("2d");
 
-const stats = {
-  high: document.getElementById("stat-high"),
-  highWeek: document.getElementById("stat-high-week"),
-  avg: document.getElementById("stat-average"),
-  low: document.getElementById("stat-low"),
-  lowWeek: document.getElementById("stat-low-week"),
-  range: document.getElementById("stat-range")
-};
+const tooltipEl = document.getElementById("chart-tooltip");
+const tooltipWeekEl = document.getElementById("tooltip-week");
+const tooltipValueEl = document.getElementById("tooltip-value");
+const tooltipZoneEl = document.getElementById("tooltip-zone");
 
-const weeks = [
-  { week: "WK1", value: 27.9 },
-  { week: "WK2", value: 18.8 },
-  { week: "WK3", value: 15.6 },
-  { week: "WK4", value: 14.5 },
-  { week: "WK5", value: 15.6 },
-  { week: "WK6", value: 18.8 },
-  { week: "WK7", value: 29.9 },
-  { week: "WK8", value: 26.3 },
-  { week: "WK9", value: 28.7 }
-];
 
-const minVal = 0;
-const maxVal = 40;
-const padding = { top: 90, right: 90, bottom: 150, left: 120 };
-const sparkles = Array.from({ length: 70 }, () => ({
-  x: Math.random(),
-  y: Math.random(),
-  size: 0.5 + Math.random() * 1.3,
-  drift: 0.25 + Math.random() * 0.75,
-  hue: Math.random() > 0.5 ? "rgba(94, 247, 255, 0.65)" : "rgba(255, 122, 204, 0.5)"
-}));
+/* STATE */
 
-let animationFrame;
-let tick = 0;
+let layout = null; // { rect, points }
+let deviceRatio = window.devicePixelRatio || 1;
 
-const formatWeek = (w) => w.replace("WK", "WK ");
-const formatPoints = (value) => `${value.toFixed(1)} pts`;
+/* UTILITIES */
 
-function hydrateStats() {
-  const sorted = [...weeks].sort((a, b) => b.value - a.value);
-  const high = sorted[0];
-  const low = sorted[sorted.length - 1];
-  const avg = weeks.reduce((acc, cur) => acc + cur.value, 0) / weeks.length;
-  stats.high.textContent = formatPoints(high.value);
-  stats.highWeek.textContent = `${formatWeek(high.week)} — crest`;
-  stats.low.textContent = formatPoints(low.value);
-  stats.lowWeek.textContent = `${formatWeek(low.week)} — trough`;
-  stats.avg.textContent = formatPoints(avg);
-  stats.range.textContent = formatPoints(high.value - low.value);
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
 }
 
-hydrateStats();
-
-function valueToY(val, rect) {
-  const pct = (val - minVal) / (maxVal - minVal);
+function mapValueToY(value, rect) {
+  const { minVal, maxVal } = CONFIG;
+  const pct = (value - minVal) / (maxVal - minVal);
   return rect.y + rect.h - pct * rect.h;
 }
 
-function buildPoints(rect) {
-  const usableWidth = rect.w;
-  const spacing = usableWidth / (weeks.length - 1);
-  return weeks.map((wk, idx) => ({
-    ...wk,
-    x: rect.x + idx * spacing,
-    y: valueToY(wk.value, rect)
-  }));
+function zoneForValue(value) {
+  if (value <= ZONES.BAD.max) return ZONES.BAD;
+  if (value <= ZONES.GOOD.max) return ZONES.GOOD;
+  return ZONES.GREAT;
 }
 
-function drawRoundedPanel(x, y, width, height, radius = 32) {
-  const r = Math.min(radius, height / 2, width / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+function formatPoints(value) {
+  return `${value.toFixed(1)} pts`;
 }
 
-function paintBackdrop(w, h, time) {
-  const gradient = ctx.createLinearGradient(0, 0, w, h);
-  gradient.addColorStop(0, "rgba(3, 6, 18, 0.95)");
-  gradient.addColorStop(1, "rgba(7, 12, 28, 0.95)");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, w, h);
+/* PROGRESS CIRCLES HYDRATION (static metrics expressed via CSS vars if needed)
+ * Metrics:
+ * - Consistency Rate (CSTY%): 66.7% of 100
+ * - Ceiling Pos Rank (CL_RK): 4 where 1 is best; use inverse mapping on 1-20 scale
+ */
 
+function hydrateProgressCircles() {
+  const consistencyCircle = document.querySelector(
+    ".progress-circle--consistency .progress-ring-fill"
+  );
+  if (consistencyCircle) {
+    // 66.7% expressed directly via inline style in HTML; keep here for clarity / future hooks.
+    consistencyCircle.style.setProperty("--progress", (66.7 / 100).toFixed(3));
+  }
+
+  const ceilingCircle = document.querySelector(
+    ".progress-circle--ceiling .progress-ring-fill--ceiling"
+  );
+  if (ceilingCircle) {
+    const rank = 4;
+    const maxRank = CONFIG.ceilingRankMax;
+    const normalized = clamp((maxRank - rank) / (maxRank - 1), 0, 1);
+    // Inline style already set close; enforce canonical mapping so arc = closeness to #1.
+    ceilingCircle.style.setProperty("--progress", normalized.toFixed(3));
+  }
+}
+
+/* LAYOUT + POINTS */
+
+function computeLayout() {
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(320, rect.width || canvas.clientWidth || 320);
+  const height = Math.max(260, rect.height || canvas.clientHeight || 260);
+
+  const padCfg = CONFIG.padding;
+
+  // Clamp paddings so they remain proportionate on smaller widths/heights
+  const pad = {
+    top: Math.max(padCfg.top, height * 0.08),
+    right: Math.max(padCfg.right, width * 0.04),
+    bottom: Math.max(padCfg.bottom, height * 0.14),
+    left: Math.max(padCfg.left, width * 0.09)
+  };
+
+  const chartRect = {
+    x: pad.left,
+    y: pad.top,
+    w: width - pad.left - pad.right,
+    h: height - pad.top - pad.bottom
+  };
+
+  const n = DATA.weeks.length;
+  const spacing = chartRect.w / (n - 1);
+
+  const points = DATA.weeks.map((w, i) => {
+    const x = chartRect.x + i * spacing;
+    const y = mapValueToY(w.value, chartRect);
+    return {
+      ...w,
+      x,
+      y,
+      zone: zoneForValue(w.value)
+    };
+  });
+
+  return { rect: chartRect, points };
+}
+
+
+/* DRAW HELPERS */
+
+function clearCanvas() {
+  const width = canvas.width / deviceRatio;
+  const height = canvas.height / deviceRatio;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+}
+
+function drawBackdropGradient() {
+  const width = canvas.width / deviceRatio;
+  const height = canvas.height / deviceRatio;
+
+  // Deterministic dark gradient matching shell aesthetic
+  const g = ctx.createLinearGradient(0, 0, 0, height);
+  g.addColorStop(0, "#020309");
+  g.addColorStop(0.35, "#040712");
+  g.addColorStop(1, "#010108");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, width, height);
+
+  // Subtle deterministic inner vignette
   ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  ctx.filter = "blur(120px)";
-  ctx.fillStyle = `rgba(118, 255, 248, ${0.12 + 0.05 * Math.sin(time * 0.6)})`;
-  ctx.beginPath();
-  ctx.ellipse(w * 0.3, h * 0.2, w * 0.35, h * 0.22, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = `rgba(255, 120, 210, ${0.1 + 0.04 * Math.cos(time * 0.7)})`;
-  ctx.beginPath();
-  ctx.ellipse(w * 0.75, h * 0.68, w * 0.4, h * 0.25, 0.4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawGlassBackplate(rect) {
-  ctx.save();
-  drawRoundedPanel(rect.x - 50, rect.y - 60, rect.w + 100, rect.h + 140, 42);
-  const gradient = ctx.createLinearGradient(rect.x, rect.y - 80, rect.x + rect.w, rect.y + rect.h + 140);
-  gradient.addColorStop(0, "rgba(12, 16, 32, 0.9)");
-  gradient.addColorStop(0.35, "rgba(18, 24, 46, 0.75)");
-  gradient.addColorStop(1, "rgba(7, 9, 22, 0.6)");
-  ctx.fillStyle = gradient;
-  ctx.fill();
-  ctx.strokeStyle = "rgba(118, 156, 255, 0.25)";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  const sheen = ctx.createLinearGradient(rect.x, rect.y - 60, rect.x, rect.y + rect.h);
-  sheen.addColorStop(0, "rgba(255, 255, 255, 0.22)");
-  sheen.addColorStop(0.25, "rgba(255, 255, 255, 0.05)");
-  sheen.addColorStop(1, "rgba(255, 255, 255, 0)");
-  ctx.clip();
-  ctx.fillStyle = sheen;
-  ctx.fillRect(rect.x - 50, rect.y - 60, rect.w + 100, rect.h + 140);
+  ctx.globalCompositeOperation = "multiply";
+  const vignette = ctx.createRadialGradient(
+    width * 0.5,
+    height * 0.45,
+    0,
+    width * 0.5,
+    height * 0.45,
+    Math.max(width, height) * 0.78
+  );
+  vignette.addColorStop(0, "rgba(0,0,0,0)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.55)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, width, height);
   ctx.restore();
 }
 
 function drawZoneBands(rect) {
-  const eliteTop = rect.y;
-  const eliteBottom = valueToY(22, rect);
-  const solidBottom = valueToY(16, rect);
   ctx.save();
-  ctx.fillStyle = "rgba(91, 230, 255, 0.08)";
-  ctx.fillRect(rect.x, eliteTop, rect.w, eliteBottom - eliteTop);
-  ctx.fillStyle = "rgba(136, 120, 255, 0.08)";
-  ctx.fillRect(rect.x, eliteBottom, rect.w, solidBottom - eliteBottom);
-  ctx.fillStyle = "rgba(255, 116, 193, 0.06)";
-  ctx.fillRect(rect.x, solidBottom, rect.w, rect.y + rect.h - solidBottom);
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
+
+  const yBadTop = mapValueToY(ZONES.BAD.max, rect);
+  const yGoodTop = mapValueToY(ZONES.GOOD.max, rect);
+
+  // Great zone band (top)
+  const gGreat = ctx.createLinearGradient(rect.x, rect.y, rect.x, yGoodTop);
+  gGreat.addColorStop(0, COLORS.zoneGreat.fillFrom);
+  gGreat.addColorStop(1, COLORS.zoneGreat.fillTo);
+  ctx.fillStyle = gGreat;
+  ctx.fillRect(rect.x, rect.y, rect.w, yGoodTop - rect.y);
+
+  // Good zone band (middle)
+  const gGood = ctx.createLinearGradient(rect.x, yGoodTop, rect.x, yBadTop);
+  gGood.addColorStop(0, COLORS.zoneGood.fillFrom);
+  gGood.addColorStop(1, COLORS.zoneGood.fillTo);
+  ctx.fillStyle = gGood;
+  ctx.fillRect(rect.x, yGoodTop, rect.w, yBadTop - yGoodTop);
+
+  // Bad zone band (bottom)
+  const gBad = ctx.createLinearGradient(
+    rect.x,
+    yBadTop,
+    rect.x,
+    rect.y + rect.h
+  );
+  gBad.addColorStop(0, COLORS.zoneBad.fillFrom);
+  gBad.addColorStop(1, COLORS.zoneBad.fillTo);
+  ctx.fillStyle = gBad;
+  ctx.fillRect(rect.x, yBadTop, rect.w, rect.y + rect.h - yBadTop);
+
+  // Zone boundaries are implicitly communicated via tick labels; no extra hard lines.
+
   ctx.restore();
-}
-
-function drawLiquidWaves(rect, time) {
-  const renderWave = (amplitude, phase, color, opacity) => {
-    ctx.save();
-    ctx.beginPath();
-    const baseY = rect.y + rect.h * 0.35;
-    const segments = 80;
-    for (let i = 0; i <= segments; i++) {
-      const pct = i / segments;
-      const x = rect.x + pct * rect.w;
-      const waveY = baseY + Math.sin(pct * Math.PI * 2 + phase + time * 0.6) * amplitude;
-      if (i === 0) ctx.moveTo(x, waveY);
-      else ctx.lineTo(x, waveY);
-    }
-    ctx.lineTo(rect.x + rect.w, rect.y + rect.h + 40);
-    ctx.lineTo(rect.x, rect.y + rect.h + 40);
-    ctx.closePath();
-    ctx.globalCompositeOperation = "screen";
-    ctx.fillStyle = `rgba(${color.join(",")}, ${opacity})`;
-    ctx.fill();
-    ctx.restore();
-  };
-
-  renderWave(rect.h * 0.06, 0, [95, 232, 255], 0.08);
-  renderWave(rect.h * 0.08, Math.PI / 2, [255, 128, 214], 0.05);
 }
 
 function drawGrid(rect) {
   ctx.save();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+
+  // Horizontal grid lines at major structure (aligned with yTicks)
+  ctx.setLineDash([4, 8]);
+  ctx.strokeStyle = COLORS.gridLine;
   ctx.lineWidth = 1;
-  ctx.setLineDash([6, 12]);
-  for (let v = 0; v <= maxVal; v += 10) {
-    const y = valueToY(v, rect);
+  CONFIG.yTicks.forEach((v) => {
+    const y = mapValueToY(v, rect);
     ctx.beginPath();
     ctx.moveTo(rect.x, y);
     ctx.lineTo(rect.x + rect.w, y);
     ctx.stroke();
-  }
+  });
+
+  // Vertical columns for each week
   ctx.setLineDash([]);
-  weeks.forEach((_, idx) => {
-    const x = rect.x + (rect.w / (weeks.length - 1)) * idx;
-    ctx.globalAlpha = 0.35;
+  ctx.strokeStyle = COLORS.weekGrid;
+  const step = rect.w / (DATA.weeks.length - 1);
+  DATA.weeks.forEach((_, i) => {
+    const x = rect.x + step * i;
     ctx.beginPath();
     ctx.moveTo(x, rect.y);
     ctx.lineTo(x, rect.y + rect.h);
     ctx.stroke();
   });
+
   ctx.restore();
 }
 
-function drawSparkles(rect, time) {
+/**
+ * Explicit axes:
+ *  - X-axis: W1–W9, labeled, with central label "Week"
+ *  - Y-axis: ticks at [0, 8, 16, 22, 30, 40], label "Fantasy Points"
+ */
+function drawAxes(rect) {
   ctx.save();
-  ctx.globalCompositeOperation = "screen";
-  sparkles.forEach((sparkle, idx) => {
-    const oscillation = Math.sin(time * 0.6 + idx) * 0.02;
-    const x = rect.x + (((sparkle.x + oscillation) % 1 + 1) % 1) * rect.w;
-    const y = rect.y + (((sparkle.y + time * 0.02 * sparkle.drift) % 1 + 1) % 1) * rect.h;
-    const radius = 10 + sparkle.size * 20;
-    const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    glow.addColorStop(0, sparkle.hue);
-    glow.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  ctx.restore();
-}
 
-function drawColumns(points, rect, time) {
-  const columnWidth = Math.min(50, (rect.w / (weeks.length - 1)) * 0.55);
+  // Base axes
+  ctx.strokeStyle = COLORS.axis;
+  ctx.lineWidth = 1.2;
+
+  // Y-axis
+  ctx.beginPath();
+  ctx.moveTo(rect.x, rect.y);
+  ctx.lineTo(rect.x, rect.y + rect.h);
+  ctx.stroke();
+
+  // X-axis
+  ctx.beginPath();
+  ctx.moveTo(rect.x, rect.y + rect.h);
+  ctx.lineTo(rect.x + rect.w, rect.y + rect.h);
+  ctx.stroke();
+
+  // Y-axis ticks and labels
+  ctx.fillStyle = COLORS.textSoft;
+  ctx.font = `10px ${CONFIG.fontFamily}`;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+
+  CONFIG.yTicks.forEach((v) => {
+    const y = mapValueToY(v, rect);
+
+    // Tick
+    ctx.beginPath();
+    ctx.moveTo(rect.x - 4, y);
+    ctx.lineTo(rect.x, y);
+    ctx.stroke();
+
+    // Label
+    ctx.fillText(String(v), rect.x - 8, y);
+  });
+
+  // Y-axis label "Fantasy Points"
   ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  points.forEach((p, idx) => {
-    const x = p.x - columnWidth / 2;
-    const baseY = rect.y + rect.h;
-    const gradient = ctx.createLinearGradient(x, p.y, x, baseY);
-    gradient.addColorStop(0, "rgba(96, 248, 255, 0.25)");
-    gradient.addColorStop(0.5, "rgba(90, 126, 255, 0.12)");
-    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(x, p.y, columnWidth, baseY - p.y);
+  ctx.translate(rect.x - 26, rect.y + rect.h / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = `9px ${CONFIG.fontFamily}`;
+  ctx.fillStyle = "rgba(156, 177, 245, 0.9)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("Fantasy Points", 0, 0);
+  ctx.restore();
 
-    const offset = Math.sin(time * 1.4 + idx) * 8;
-    const highlight = ctx.createLinearGradient(x, p.y - 20, x, baseY);
-    highlight.addColorStop(0, "rgba(255, 255, 255, 0.25)");
-    highlight.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = highlight;
+  // X-axis week labels
+  const step = rect.w / (DATA.weeks.length - 1);
+  ctx.font = `9px ${CONFIG.fontFamily}`;
+  ctx.fillStyle = "rgba(156, 177, 245, 0.9)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+
+  DATA.weeks.forEach((w, i) => {
+    const x = rect.x + step * i;
+    const y = rect.y + rect.h + 6;
+
+    // Tick
     ctx.beginPath();
-    ctx.moveTo(x, p.y + offset);
-    ctx.quadraticCurveTo(p.x, p.y - 50, x + columnWidth, p.y + offset);
-    ctx.lineTo(x + columnWidth, baseY);
-    ctx.lineTo(x, baseY);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(x, rect.y + rect.h);
+    ctx.lineTo(x, rect.y + rect.h + 4);
+    ctx.stroke();
+
+    // Label
+    ctx.fillText(`W${w.weekIndex}`, x, y + 2);
   });
+
+  // X-axis label "Week"
+  ctx.font = `9px ${CONFIG.fontFamily}`;
+  ctx.fillStyle = "rgba(132, 163, 242, 0.96)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText("Week", rect.x + rect.w / 2, rect.y + rect.h + 20);
+
+  // Chart title & subtitle inside chart area (top-left)
+  ctx.font = `11px ${CONFIG.fontFamily}`;
+  ctx.fillStyle = "rgba(214, 224, 255, 0.98)";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText("Weekly Fantasy Points (Weeks 1–9)", rect.x + 4, rect.y - 14);
+
+  ctx.font = `9px ${CONFIG.fontFamily}`;
+  ctx.fillStyle = "rgba(148, 176, 255, 0.94)";
+  ctx.fillText("Liquid Glass Consistency Map", rect.x + 4, rect.y - 3);
+
   ctx.restore();
 }
 
-function traceCurve(points, close = false, baseY = 0) {
+function traceLine(points) {
+  if (!points.length) return;
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 0; i < points.length - 1; i++) {
-    const current = points[i];
-    const next = points[i + 1];
-    const midX = (current.x + next.x) / 2;
-    const midY = (current.y + next.y) / 2;
-    ctx.quadraticCurveTo(current.x, current.y, midX, midY);
-  }
-  const lastPoint = points[points.length - 1];
-  ctx.lineTo(lastPoint.x, lastPoint.y);
-  if (close) {
-    ctx.lineTo(lastPoint.x, baseY);
-    ctx.lineTo(points[0].x, baseY);
-    ctx.closePath();
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i];
+    ctx.lineTo(p.x, p.y);
   }
 }
 
-function drawArea(points, rect) {
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  const gradient = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.h);
-  gradient.addColorStop(0, "rgba(107, 251, 255, 0.35)");
-  gradient.addColorStop(0.35, "rgba(118, 133, 255, 0.25)");
-  gradient.addColorStop(1, "rgba(5, 7, 17, 0)");
-  ctx.fillStyle = gradient;
-  traceCurve(points, true, rect.y + rect.h);
-  ctx.fill();
-  ctx.restore();
-}
+function drawLine(points) {
+  if (!points.length) return;
 
-function drawSpline(points) {
   ctx.save();
-  ctx.shadowColor = "rgba(95, 248, 255, 0.35)";
-  ctx.shadowBlur = 25;
-  ctx.lineWidth = 3;
-  const lastPoint = points[points.length - 1];
-  const gradient = ctx.createLinearGradient(points[0].x, points[0].y, lastPoint.x, lastPoint.y);
-  gradient.addColorStop(0, "#5ef3ff");
-  gradient.addColorStop(0.5, "#7a7cff");
-  gradient.addColorStop(1, "#ff8ace");
-  ctx.strokeStyle = gradient;
-  traceCurve(points, false, 0);
+  ctx.lineWidth = 2.4;
+  ctx.shadowColor = "rgba(124,245,255,0.22)";
+  ctx.shadowBlur = 14;
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const grad = ctx.createLinearGradient(first.x, first.y, last.x, last.y);
+  grad.addColorStop(0, COLORS.spline.from);
+  grad.addColorStop(0.5, COLORS.spline.mid);
+  grad.addColorStop(1, COLORS.spline.to);
+
+  ctx.strokeStyle = grad;
+
+  traceLine(points);
   ctx.stroke();
   ctx.restore();
 }
 
-function zoneVisuals(value) {
-  if (value <= 16) {
-    return { core: "#ff74c7", glow: "rgba(255, 123, 210, 0.65)", chip: "rgba(255, 116, 193, 0.75)" };
-  }
-  if (value <= 22) {
-    return { core: "#b6a1ff", glow: "rgba(181, 167, 255, 0.6)", chip: "rgba(146, 127, 255, 0.75)" };
-  }
-  return { core: "#85f8ff", glow: "rgba(133, 248, 255, 0.7)", chip: "rgba(133, 248, 255, 0.85)" };
-}
 
-function drawPointDetails(points, rect) {
+
+
+function drawPoints(points, rect) {
+  ctx.save();
+
+  // Identify max and min for subtle emphasis
+  const maxPoint = points.reduce((m, p) => (p.value > m.value ? p : m), points[0]);
+  const minPoint = points.reduce((m, p) => (p.value < m.value ? p : m), points[0]);
+
   points.forEach((p) => {
-    const zone = zoneVisuals(p.value);
+    const isMax = p === maxPoint;
+    const isMin = p === minPoint;
+
+    const zone = p.zone;
+    let baseColor;
+    if (zone === ZONES.BAD) baseColor = COLORS.zoneBad.accent;
+    else if (zone === ZONES.GOOD) baseColor = COLORS.zoneGood.accent;
+    else baseColor = COLORS.zoneGreat.accent;
+
+    // Base visual: compact, disciplined nodes
+    let coreRadius = 4.2;
+    let strokeWidth = 1;
+    let strokeColor = "rgba(255,255,255,0.9)";
+    let glowOuterRadius = 7;
+    let glowAlpha = 0.18;
+
+    if (isMax) {
+      coreRadius = 6;               // Hero point
+      strokeWidth = 1.4;
+      strokeColor = "rgba(255,196,160,0.98)";
+      glowOuterRadius = 10;
+      glowAlpha = 0.32;
+    } else if (isMin) {
+      coreRadius = 5;               // Slightly called out, cooler
+      strokeWidth = 1.2;
+      strokeColor = "rgba(162,188,255,0.98)";
+      glowOuterRadius = 8;
+      glowAlpha = 0.24;
+    }
+
+    // Very subtle outer glow (no large neon halos)
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 32);
-    glow.addColorStop(0, zone.glow);
-    glow.addColorStop(0.8, "rgba(0,0,0,0)");
+    ctx.globalCompositeOperation = "screen";
+    const glow = ctx.createRadialGradient(
+      p.x,
+      p.y,
+      0,
+      p.x,
+      p.y,
+      glowOuterRadius
+    );
+    glow.addColorStop(0, `rgba(124,245,255,${isMax ? glowAlpha : glowAlpha * 0.9})`);
+    glow.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 32, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, glowOuterRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
-    const pulse = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 12);
-    pulse.addColorStop(0, "#060a15");
-    pulse.addColorStop(1, zone.core);
-    ctx.fillStyle = pulse;
+    // Core node: zone-tinted solid with soft inner highlight
+    const inner = ctx.createRadialGradient(
+      p.x,
+      p.y - 1,
+      0,
+      p.x,
+      p.y + 1,
+      coreRadius * 1.4
+    );
+    inner.addColorStop(0, "rgba(6,9,18,1)");
+    inner.addColorStop(0.55, baseColor);
+    inner.addColorStop(1, "rgba(240,244,255,0.96)");
+    ctx.fillStyle = inner;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, coreRadius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
-    ctx.lineWidth = 2;
+
+    // Thin rim for precision
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = strokeWidth;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, coreRadius + 0.4, 0, Math.PI * 2);
     ctx.stroke();
 
+    // Vertical guide to x-axis (understated)
     ctx.save();
-    ctx.setLineDash([4, 6]);
-    ctx.strokeStyle = "rgba(133, 248, 255, 0.25)";
+    ctx.setLineDash([2, 5]);
+    ctx.strokeStyle = "rgba(124,245,255,0.06)";
+    ctx.lineWidth = 0.4;
     ctx.beginPath();
-    ctx.moveTo(p.x, p.y + 12);
+    ctx.moveTo(p.x, p.y + coreRadius + 1);
     ctx.lineTo(p.x, rect.y + rect.h);
     ctx.stroke();
     ctx.restore();
 
-    const label = `${p.value.toFixed(1)} pts`;
-    ctx.font = "12.4px 'Space Grotesk', system-ui, sans-serif";
-    const labelWidth = ctx.measureText(label).width + 32;
-    const chipX = Math.min(Math.max(p.x - labelWidth / 2, rect.x + 10), rect.x + rect.w - labelWidth - 10);
-    const chipY = p.y - 48;
-    const chipHeight = 30;
+    // Value label (always above point; padding guarantees no collision)
     ctx.save();
-    drawRoundedPanel(chipX, chipY, labelWidth, chipHeight, 14);
-    const chipGrad = ctx.createLinearGradient(chipX, chipY, chipX + labelWidth, chipY + chipHeight);
-    chipGrad.addColorStop(0, "rgba(6, 7, 18, 0.95)");
-    chipGrad.addColorStop(1, "rgba(24, 29, 55, 0.55)");
-    ctx.fillStyle = chipGrad;
-    ctx.fill();
-    ctx.strokeStyle = zone.chip;
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    ctx.globalCompositeOperation = "screen";
-    const chipSheen = ctx.createLinearGradient(chipX, chipY, chipX, chipY + chipHeight);
-    chipSheen.addColorStop(0, `${zone.chip}`);
-    chipSheen.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = chipSheen;
-    drawRoundedPanel(chipX, chipY, labelWidth, chipHeight, 14);
-    ctx.fill();
+    ctx.font = `9px ${CONFIG.fontFamily}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = "rgba(230, 238, 255, 0.96)";
+    const labelOffset = 8;
+    ctx.fillText(p.value.toFixed(1), p.x, p.y - labelOffset);
     ctx.restore();
-
-    ctx.fillStyle = "#f7fbff";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, chipX + 16, chipY + chipHeight / 2);
-  });
-}
-
-function drawAxes(rect) {
-  ctx.save();
-  ctx.strokeStyle = "rgba(133, 160, 255, 0.4)";
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.moveTo(rect.x, rect.y - 15);
-  ctx.lineTo(rect.x, rect.y + rect.h + 10);
-  ctx.lineTo(rect.x + rect.w + 15, rect.y + rect.h + 10);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawAxisLabels(rect, points) {
-  ctx.font = "12px 'Space Grotesk', system-ui, sans-serif";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
-  for (let v = 0; v <= maxVal; v += 10) {
-    const y = valueToY(v, rect);
-    const text = `${v} pts`;
-    ctx.fillText(text, rect.x - 70, y);
-  }
-
-  ctx.textBaseline = "top";
-  points.forEach((p) => {
-    const weekLabel = p.week.replace("WK", "WK • ");
-    ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
-    ctx.fillText(weekLabel, p.x - 26, rect.y + rect.h + 18);
   });
 
-  ctx.save();
-  ctx.translate(rect.x - 90, rect.y + rect.h / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-  ctx.font = "14px 'Space Grotesk', system-ui, sans-serif";
-  ctx.fillText("Fantasy Points", 0, 0);
-  ctx.restore();
-
-  ctx.font = "14px 'Space Grotesk', system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("Week Timeline", rect.x + rect.w / 2, rect.y + rect.h + 50);
-}
-
-function draw(time = 0) {
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.restore();
-
-  ctx.save();
-  paintBackdrop(w, h, time);
-  const rect = {
-    x: padding.left,
-    y: padding.top,
-    w: w - padding.left - padding.right,
-    h: h - padding.top - padding.bottom
-  };
-  drawGlassBackplate(rect);
-  drawZoneBands(rect);
-  drawLiquidWaves(rect, time);
-  drawGrid(rect);
-  drawSparkles(rect, time);
-  const points = buildPoints(rect);
-  drawColumns(points, rect, time);
-  drawArea(points, rect);
-  drawSpline(points);
-  drawPointDetails(points, rect);
-  drawAxes(rect);
-  drawAxisLabels(rect, points);
   ctx.restore();
 }
+
+/* RENDER */
 
 function render() {
-  draw(tick);
-  tick += 0.01;
-  animationFrame = requestAnimationFrame(render);
+  if (!layout) return;
+  clearCanvas();
+  drawBackdropGradient();
+  drawZoneBands(layout.rect);
+  drawGrid(layout.rect);
+  drawAxes(layout.rect);
+  drawLine(layout.points);
+  drawPoints(layout.points, layout.rect);
 }
+
+/* CANVAS SIZE / RESIZE */
 
 function resizeCanvas() {
-  const ratio = window.devicePixelRatio || 1;
-  canvas.width = canvas.clientWidth * ratio;
-  canvas.height = canvas.clientHeight * ratio;
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-}
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(320, rect.width || canvas.clientWidth || 320);
+  const height = Math.max(260, rect.height || canvas.clientHeight || 260);
 
-function handleResize() {
-  resizeCanvas();
-  if (animationFrame) {
-    cancelAnimationFrame(animationFrame);
-  }
+  deviceRatio = window.devicePixelRatio || 1;
+  canvas.width = width * deviceRatio;
+  canvas.height = height * deviceRatio;
+  ctx.setTransform(deviceRatio, 0, 0, deviceRatio, 0, 0);
+
+  layout = computeLayout();
   render();
 }
 
-window.addEventListener("resize", handleResize);
-handleResize();
+/* TOOLTIP + HOVER */
+
+function updateTooltip(point) {
+  if (!point) {
+    tooltipEl.hidden = true;
+    return;
+  }
+
+  const zone = point.zone;
+  let zoneLabel;
+  let zoneColor;
+  if (zone === ZONES.BAD) {
+    zoneLabel = "Bad Zone • 0–16";
+    zoneColor = COLORS.zoneBad.accent;
+  } else if (zone === ZONES.GOOD) {
+    zoneLabel = "Good Zone • 16–22";
+    zoneColor = COLORS.zoneGood.accent;
+  } else {
+    zoneLabel = "Great Zone • 22–40";
+    zoneColor = COLORS.zoneGreat.accent;
+  }
+
+  tooltipWeekEl.textContent = `Week ${point.weekIndex}`;
+  tooltipValueEl.textContent = formatPoints(point.value);
+  tooltipZoneEl.textContent = zoneLabel;
+  tooltipEl.style.borderColor = zoneColor;
+
+  const canvasRect = canvas.getBoundingClientRect();
+  const tx = canvasRect.left + point.x;
+  const ty = canvasRect.top + point.y;
+
+  const tooltipWidth =
+    tooltipEl.offsetWidth || CONFIG.tooltipWidthFallback;
+  let left = tx;
+
+  // Center tooltip above point, clamped to canvas horizontally
+  const half = tooltipWidth / 2;
+  if (left - half < canvasRect.left + 8) {
+    left = canvasRect.left + 8 + half;
+  } else if (left + half > canvasRect.right - 8) {
+    left = canvasRect.right - 8 - half;
+  }
+
+  tooltipEl.style.left = `${left}px`;
+  tooltipEl.style.top = `${ty - 20}px`;
+  tooltipEl.hidden = false;
+}
+
+function findNearestPoint(mouseX, mouseY) {
+  if (!layout) return null;
+  let nearest = null;
+  let nearestDist = Infinity;
+  const radiusSq = CONFIG.hitRadius * CONFIG.hitRadius;
+
+  layout.points.forEach((p) => {
+    const dx = mouseX - p.x;
+    const dy = mouseY - p.y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq <= radiusSq && distSq < nearestDist) {
+      nearestDist = distSq;
+      nearest = p;
+    }
+  });
+
+  return nearest;
+}
+
+function handleMouseMove(evt) {
+  if (!layout) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (evt.clientX - rect.left);
+  const y = (evt.clientY - rect.top);
+
+  const point = findNearestPoint(x, y);
+  updateTooltip(point);
+}
+
+function handleMouseLeave() {
+  updateTooltip(null);
+}
+
+/* INIT */
+
+function init() {
+  hydrateProgressCircles();
+  resizeCanvas();
+
+  window.addEventListener("resize", resizeCanvas);
+  canvas.addEventListener("mousemove", handleMouseMove);
+  canvas.addEventListener("mouseleave", handleMouseLeave);
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}
