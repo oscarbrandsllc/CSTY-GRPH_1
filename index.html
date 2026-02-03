@@ -2,50 +2,120 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>CONSISTENCY MAP — Justin Herbert</title>
+    <title>Weekly Fantasy Points — Liquid Glass Consistency Map</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <div class="header">
-        <div>
-          <div class="title">CONSISTENCY MAP</div>
-          <div class="player-name">Justin Herbert — Weekly Fantasy Output</div>
-        </div>
-        <div class="legend">
-          <span><b class="legend-dot legend-dot--low"></b>0–16: Low Impact</span>
-          <span><b class="legend-dot legend-dot--solid"></b>16–22: Solid</span>
-          <span><b class="legend-dot legend-dot--elite"></b>22–40: Elite</span>
-          <span><b class="legend-dot legend-dot--trace"></b>Performance Trace</span>
-        </div>
-      </div>
+    <main class="page">
+      <section class="glass-shell">
+        <!-- Ambient caustic glows -->
+        <div class="shell-glow shell-glow--left"></div>
+        <div class="shell-glow shell-glow--right"></div>
 
-      <div class="stat-pills">
-        <div class="stat-pill" data-tone="high">
-          <div class="pill-label">Ceiling Pulse</div>
-          <div class="pill-value" id="stat-high">--</div>
-          <div class="pill-sub" id="stat-high-week">Week —</div>
-        </div>
-        <div class="stat-pill" data-tone="avg">
-          <div class="pill-label">Liquid Mean</div>
-          <div class="pill-value" id="stat-average">--</div>
-          <div class="pill-sub">Season Average</div>
-        </div>
-        <div class="stat-pill" data-tone="low">
-          <div class="pill-label">Floor Echo</div>
-          <div class="pill-value" id="stat-low">--</div>
-          <div class="pill-sub" id="stat-low-week">Week —</div>
-        </div>
-        <div class="stat-pill" data-tone="vol">
-          <div class="pill-label">Volatility Wake</div>
-          <div class="pill-value" id="stat-range">--</div>
-          <div class="pill-sub">High − Low</div>
-        </div>
-      </div>
+        <!-- Top meta / header -->
+        <header class="shell-header">
+          <div class="shell-header-left">
+            <div class="eyebrow">WEEKLY FANTASY POINTS</div>
+            <h1 class="player-title">Justin Herbert — Consistency Sculpture</h1>
+            <p class="subtitle">Weeks 1–9 • 0–40 pt evaluation lens</p>
+          </div>
 
-      <canvas id="infographicCanvas"></canvas>
-    </div>
+          <div class="shell-header-center">
+            <div class="avg-label">Player Average</div>
+            <div class="avg-value">22.0</div>
+            <div class="avg-caption">Stabilized output across featured span</div>
+          </div>
+
+          <div class="shell-header-right">
+            <div class="minmax-pill">
+              <div class="pill-label">Performance Edges</div>
+              <div class="pill-row">
+                <span class="pill-tag pill-tag--high">
+                  Peak
+                  <span id="peak-points">--</span>
+                  <span id="peak-week" class="pill-week">WK–</span>
+                </span>
+              </div>
+              <div class="pill-row">
+                <span class="pill-tag pill-tag--low">
+                  Floor
+                  <span id="floor-points">--</span>
+                  <span id="floor-week" class="pill-week">WK–</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- Legend and quick stats -->
+        <section class="shell-meta">
+          <div class="meta-stat">
+            <div class="meta-label">Crest Range</div>
+            <div class="meta-value" id="stat-range">--</div>
+            <div class="meta-sub">Spread between peak and floor</div>
+          </div>
+          <div class="meta-stat">
+            <div class="meta-label">Consistency Profile</div>
+            <div class="meta-value" id="stat-profile">--</div>
+            <div class="meta-sub">Zone-weighted scoring signature</div>
+          </div>
+          <div class="meta-legend">
+            <div class="zone-pill zone-pill--bad">
+              <span class="zone-dot"></span>
+              <span class="zone-label">Bad</span>
+              <span class="zone-range">0–16</span>
+            </div>
+            <div class="zone-pill zone-pill--good">
+              <span class="zone-dot"></span>
+              <span class="zone-label">Good</span>
+              <span class="zone-range">16–22</span>
+            </div>
+            <div class="zone-pill zone-pill--great">
+              <span class="zone-dot"></span>
+              <span class="zone-label">Great</span>
+              <span class="zone-range">22–40</span>
+            </div>
+            <div class="zone-pill zone-pill--trace">
+              <span class="zone-dot"></span>
+              <span class="zone-label">Trace</span>
+              <span class="zone-range">Series Path</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Chart container: canvas + tooltip overlay -->
+        <section class="chart-shell">
+          <div class="chart-glass-layer chart-glass-layer--outer"></div>
+          <div class="chart-glass-layer chart-glass-layer--inner"></div>
+          <div class="chart-caustic chart-caustic--top"></div>
+          <div class="chart-caustic chart-caustic--bottom"></div>
+
+          <canvas id="infographicCanvas" aria-label="Weekly fantasy points liquid glass chart" role="img"></canvas>
+
+          <!-- Tooltip overlay (positioned by JS) -->
+          <div id="chart-tooltip" class="chart-tooltip" hidden>
+            <div class="tooltip-label" id="tooltip-week">Week 1</div>
+            <div class="tooltip-value" id="tooltip-value">27.9 pts</div>
+            <div class="tooltip-zone" id="tooltip-zone">Great Zone</div>
+          </div>
+
+          <!-- Week labels track (helper for quick reading) -->
+          <div class="week-track" aria-hidden="true">
+            <!-- Week labels are rendered into canvas + orbs; this subtle strip reinforces the timeline -->
+            <span>WK1</span>
+            <span>WK2</span>
+            <span>WK3</span>
+            <span>WK4</span>
+            <span>WK5</span>
+            <span>WK6</span>
+            <span>WK7</span>
+            <span>WK8</span>
+            <span>WK9</span>
+          </div>
+        </section>
+      </section>
+    </main>
 
     <script src="app.js"></script>
   </body>
