@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fantasy Points - Liquid Glass Infographic</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="card">
+    <header>
+      <div class="title-block">
+        <h1>Player Weekly Fantasy Points</h1>
+        <p>9-game performance profile in liquid-glass layout • 0 → 40 pts scale</p>
+      </div>
+      <div class="legend">
+        <div class="pill"><span class="dot bad"></span><span>Under 16 fpts (Under)</span></div>
+        <div class="pill"><span class="dot good"></span><span>16 – 21.9 fpts (Solid)</span></div>
+        <div class="pill"><span class="dot great"></span><span>22+ fpts (Elite)</span></div>
+      </div>
+    </header>
+    <div class="chart-shell">
+      <small>Tap / hover on a week to see exact points and zone</small>
+      <div class="chart-box" id="chart">
+        <div class="y-axis" id="y-axis"></div>
+        <div class="chart-grid"></div>
+        <div class="chart-line" id="points-layer"></div>
+        <div class="x-axis" id="x-axis"></div>
+      </div>
+    </div>
+    <footer>
+      <div class="badge"><span class="badge-dot"></span>High-consistency, ceiling outcomes in 5/9 weeks</div>
+      <div>Zones: 0–15.9 = Under • 16–21.9 = Solid • 22–40 = Elite</div>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
